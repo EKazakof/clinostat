@@ -3,91 +3,91 @@
 TM1637 tm1637(PB8,PB9);
 
 #include "GyverButton.h"
-GButton butt_ON(PA0);        //Кнопка ON_OFF
+GButton butt_ON(PA0);        //ON_OFF button
 
 #include "GyverEncoder.h"
-Encoder enc1(PA1, PA2, PA5); //Энкодер
+Encoder enc1(PA1, PA2, PA5); //Encoder
 
-  int8_t ListDisp[4];             //хранитель цифр дисплея
-  int Disp_speed = 0;             //отображение скорости
-  volatile int speed_set = 60;    //Заданная скорость
-  int speed_temp = 0;             //Временная скорость (целевая)
-  volatile int speed_PWM = 0;     //переход скорость в PWM
-  volatile int speed_tone = 0;    //переход скорость в tone шаговика
-  volatile int tone_temp = 0;     //Промежуточная скорость шаговика (ускорение)
-  volatile int speed_in = 0;      //Скорость внутреннего диска
-  volatile int speed_out = 0;     //Скорость внешнего диска
+  int8_t ListDisp[4];             //Display digit buffer
+  int Disp_speed = 0;             //Screen Display Buffer
+  volatile int speed_set = 60;    //Set speed
+  int speed_temp = 0;             //Time speed (target)
+  volatile int speed_PWM = 0;     //Speed to PWM converter
+  volatile int speed_tone = 0;    //Speed to stepper tone converter
+  volatile int tone_temp = 0;     //Intermediate stepper speed (acceleration)
+  volatile int speed_in = 0;      //Internal disk speed
+  volatile int speed_out = 0;     //External disk speed
   volatile unsigned long time_temp = 0;
   volatile unsigned long time_prev = 0;
-  volatile unsigned long time_enc_click = 0;//Время входа в режим задания скорости
-  volatile unsigned long time_fan_in = 0;   //Предыдущая временная отсечка внутреннего холла
-  volatile unsigned long time_fan_out = 0;  //Предыдущая временная отсечка внешнего холла
-  volatile int deb_time_in = 50;            //Время антидребезга внутреннего холла
-  volatile int deb_time_out = 50;           //Время антидребезга внешнего холла
-  volatile boolean run_rotation = false;    //Разрешить или запретить вращение
-  boolean enc_click = false;                //Режим задания скорости кнопка у Энкодера
-  volatile boolean run_in = false;          //разрешить один запуск внутреннего диска
-  volatile boolean off_rotation = false;    //остановка вращения
+  volatile unsigned long time_enc_click = 0;//Time to enter the speed reference mode
+  volatile unsigned long time_fan_in = 0;   //Previous turnover time of the internal speed sensor
+  volatile unsigned long time_fan_out = 0;  //Previous turnover time of the external speed sensor
+  volatile int deb_time_in = 50;            //Anti-bounce time of the Internal speed sensor
+  volatile int deb_time_out = 50;           //Anti-bounce time of the external speed sensor
+  volatile boolean run_rotation = false;    //Enable or disable rotation
+  boolean enc_click = false;                //Speed setting mode button at the Encoder
+  volatile boolean run_in = false;          //Allow the internal disk to run
+  volatile boolean off_rotation = false;    //Rotation stop
   
 HardwareTimer *Timer3 = new HardwareTimer(TIM3);
 HardwareTimer *PWM_STP = new HardwareTimer(TIM1);
 
 void setup() {
   Serial.begin(9600);
-  pinMode(PB4, INPUT_PULLUP);     // Подтяжка пина 4 для прерывания внешнего холла
-  pinMode(PA0, INPUT_PULLUP);     // Подтяжка пина 0 для прерывания кнопка ON_OFF
+  pinMode(PB4, INPUT_PULLUP);     // Pull-up pin 4 to interrupt external hall sensor
+  pinMode(PA0, INPUT_PULLUP);     // Pull-up pin 0 for interrupt ON_OFF button
   
-  analogWriteFrequency(10000);    // Частота у PWM (10 KHz)
-  analogWriteResolution(13);      // Битность PWM
+  analogWriteFrequency(10000);    // Frequency at PWM (10 KHz)
+  analogWriteResolution(13);      // PWM bit rate
   
-  pinMode(PA15, OUTPUT);          //Шаговый двигатель EN (0 — включен, 5В — выключен)
+  pinMode(PA15, OUTPUT);          //EN stepper motor (0 - on, 5V - off)
   digitalWrite(PA15, HIGH);
-  pinMode(PA10, OUTPUT);          //Шаговый двигатель SLP(сон) (0 — сон, 5В — работа)
+  pinMode(PA10, OUTPUT);          //Stepper motor SLP(sleep) (0 - sleep, 5V - operation)
   digitalWrite(PA10, HIGH);
-  pinMode(PA8, OUTPUT);           //Шаговый двигатель DIR (0 — по часовой, 5В — против часовой)
+  pinMode(PA8, OUTPUT);           //Stepper motor DIR (0 - clockwise, 5V - counterclockwise)
   digitalWrite(PA8, HIGH);
 
   
-  enc1.setType(TYPE2);                    //Энкодер
+  enc1.setType(TYPE2);                    //Encoder
   enc1.setFastTimeout(80);
-  attachInterrupt(PA1, isrCLK, CHANGE);   // прерывание на 1 пине! CLK у Энкодера
-  attachInterrupt(PA2, isrDT, CHANGE);    // прерывание на 2 пине! DT у Энкодера
-  attachInterrupt(PA5, isrSW, CHANGE);    // прерывание на 5 пине! Кнопка у Энкодера
-  attachInterrupt(PA0, ON_OFF, CHANGE);   // прерывание на 0 пине! кнопка ON_OFF
-  attachInterrupt(PB4, fan1, FALLING);    // прерывание на 4 пине! датчик холла внутренний
-  attachInterrupt(PB3, fan2, RISING);     // прерывание на 3 пине! датчик холла внешний
-  butt_ON.setDebounce(80);                // настройка антидребезга для кнопки ON_OFF (по умолчанию 80 мс)
+  attachInterrupt(PA1, isrCLK, CHANGE);   // Interrupt on pin 1 CLK at the Encoder
+  attachInterrupt(PA2, isrDT, CHANGE);    // Interrupt on pin 2 DT at the Encoder
+  attachInterrupt(PA5, isrSW, CHANGE);    // Interrupt on pin 5 Button at the Encoder
+  attachInterrupt(PA0, ON_OFF, CHANGE);   // Interrupt on pin 0 Button at the ON_OFF
+  attachInterrupt(PB4, fan1, FALLING);    // Interrupt on pin 4 hall sensor internal
+  attachInterrupt(PB3, fan2, RISING);     // Interrupt on pin 3 hall sensor external
+  butt_ON.setDebounce(80);                // Anti-bounce setting for ON_OFF button (default 80 ms)
   
   tm1637.init();
   tm1637.set(BRIGHTEST);                  // BRIGHT_TYPICAL = 2,BRIGHT_DARKEST = 0,BRIGHTEST = 7;
   
-  Timer3->pause();                        // останавливаем таймер перед настройкой
-  Timer3->setOverflow(10000, MICROSEC_FORMAT); // Повтор запуска таймера в микросекундах (10 мс)
-  Timer3->attachInterrupt(func_tim_3);    // активируем прерывание
-  Timer3->refresh();                      // обнулить таймер 
-  Timer3->resume();                       // запускаем таймер
-  PWM_STP->setPWM(2, PA9, 100, 0);        // Шаговый двигатель step
+  Timer3->pause();                        // stop the timer before setting
+  Timer3->setOverflow(10000, MICROSEC_FORMAT); // Timer start repeat in microseconds (10 ms)
+  Timer3->attachInterrupt(func_tim_3);    // Enable interrupt
+  Timer3->refresh();                      // Reset the timer 
+  Timer3->resume();                       // Start timer
+  PWM_STP->setPWM(2, PA9, 100, 0);        // Stepper motor STEP
 }
 
-void isrCLK(){    // отработка в прерывании поворот на лево у Энкодера
+void isrCLK(){    // Processing in the interrupt left turn of the Encoder
   enc1.tick();
 }
-void isrDT(){     // отработка в прерывании поворот на право у Энкодера
+void isrDT(){     // Processing in the right turn interrupt at the Encoder
   enc1.tick();
 }
-void isrSW(){     // отработка в прерывании Кнопка у Энкодера
+void isrSW(){     // Processing in the interrupt of pressing the Button on the Encoder
   enc1.tick();
 }
-void ON_OFF(){    // отработка в прерывании Кнопка ON_OFF
+void ON_OFF(){    // Processing in the interrupt of pressing the Button ON_OFF
   butt_ON.tick();
 }
 //////////////////////////////////////////////////////////////////////
-void func_tim_3() { // обработчик внутреннего прерывания раз в (10 мс)
+void func_tim_3() { // Internal interrupt handler once every (10 ms)
   if ((millis()-time_fan_in) >= deb_time_in) {
-    attachInterrupt(PB4, fan1, FALLING); //разрешить прерывание на пине 4 после расчетного времени
+    attachInterrupt(PB4, fan1, FALLING); //Enable interrupt on pin 4 after the calculated time (anti-bounce)
   }
   if ((millis()-time_fan_out) >= deb_time_out) {
-    attachInterrupt(PB3, fan2, RISING);  //разрешить прерывание на пине 3 после расчетного времени
+    attachInterrupt(PB3, fan2, RISING);  //Enable interrupt on pin 3 after the calculated time (anti-bounce)
   }
   if (run_rotation){
     if ((speed_tone - 48) > tone_temp){
@@ -113,18 +113,18 @@ void func_tim_3() { // обработчик внутреннего прерыв�
   }
 }
 //////////////////////////////////////////////////////////////////////
-void fan1() {       // отработка в прерывании внутреннего холла
-  if (off_rotation){                //докрутить оборот и выключить
+void fan1() {       // Processing of internal hall sensor, external interrupt
+  if (off_rotation){                //Turn to zero position and stop
     speed_PWM = 0;
     analogWrite(PB7,speed_PWM);
     speed_in = 0;
   }
   else{
-    int qwe = millis()-time_fan_in;  //вычислить время оборота
-    if (qwe < deb_time_in) qwe = 60000/speed_in;  //Если время входа меньше расчетного использовать предыдущее
+    int qwe = millis()-time_fan_in;  //Calculate turnaround time
+    if (qwe < deb_time_in) qwe = 60000/speed_in;  //If the entry time is shorter than the estimated time, use the previous
     speed_in = 60000/qwe;
-    time_fan_in = millis();         //запомнить время
-    detachInterrupt(PB4);           //запрещаю прерывание на 4 пине
+    time_fan_in = millis();         //Time stamp
+    detachInterrupt(PB4);           //Disable interrupt on pin 4
     
     Serial.print("deb_time_in- ");
     Serial.print(deb_time_in);
@@ -135,14 +135,14 @@ void fan1() {       // отработка в прерывании внутрен
     Serial.print("time- ");
     Serial.println(qwe);
       
-    if ((qwe - 3) > (60000/speed_set)){            //Добавить PWM при низкой скорости
+    if ((qwe - 3) > (60000/speed_set)){            //Add PWM at low speed
       speed_PWM += (qwe - 60000/speed_set)/2 + 1;
       if(speed_PWM > 8191) speed_PWM = 8191;
       analogWrite(PB7,speed_PWM);
       Serial.print("+= ");
       Serial.println((qwe - 60000/speed_set)/2 + 1);
     }
-    if ((qwe + 3) < (60000/speed_set)){            //Убавить PWM при высокой скорости
+    if ((qwe + 3) < (60000/speed_set)){            //Turn down PWM at high speed
       speed_PWM -= (60000/speed_set - qwe)/2 + 1;
       if (speed_PWM < 0) speed_PWM = 0;
       analogWrite(PB7,speed_PWM);
@@ -152,19 +152,19 @@ void fan1() {       // отработка в прерывании внутрен
   }
 }
 //////////////////////////////////////////////////////////////////////
-void fan2() {       // отработка в прерывании внешнего холла
-  if (off_rotation){                 //докрутить оборот и выключить
-    digitalWrite(PA15, HIGH);        //Шаговый двигатель EN 5В — выключен
-    PWM_STP->setPWM(2, PA9, 100, 0); //Отключить частоту step на шаговом двигателе
+void fan2() {       // Processing of external hall sensor, external interrupt
+  if (off_rotation){                 //Turn to zero position and stop
+    digitalWrite(PA15, HIGH);        //EN 5V stepper motor - off
+    PWM_STP->setPWM(2, PA9, 100, 0); //Disable step frequency on stepper motor
     speed_tone = 0;
     speed_out = 0;
   }
   else{
-    int qwe = millis()-time_fan_out;  //вычислить время оборота
-    if (qwe < deb_time_out) qwe = 60000/speed_out;  //Если время входа меньше расчетного использовать предыдущее
+    int qwe = millis()-time_fan_out;  //Calculate turnaround time
+    if (qwe < deb_time_out) qwe = 60000/speed_out;  //If the entry time is shorter than the estimated time, use the previous
     speed_out = 60000/qwe;
-    time_fan_out = millis();         //запомнить время
-    detachInterrupt(PB3);            //запрещаю прерывание на 3 пине
+    time_fan_out = millis();         //Time stamp
+    detachInterrupt(PB3);            //Disable interrupt on pin 3
     
     Serial.print("deb_time_out- ");
     Serial.print(deb_time_out);
@@ -175,19 +175,19 @@ void fan2() {       // отработка в прерывании внешнег
     Serial.print("time- ");
     Serial.println(qwe);
       
-    if ((qwe - 1) > (60000/speed_set)){            //Добавить PWM при низкой скорости
+    if ((qwe - 1) > (60000/speed_set)){            //Add PWM at low speed
       tone_temp += 4;
       PWM_STP->setPWM(2, PA9, tone_temp, 50);
       Serial.print("+= ");
       Serial.println("4");
     }
-    if ((qwe + 1) < (60000/speed_set)){            //Убавить PWM при высокой скорости
+    if ((qwe + 1) < (60000/speed_set)){            //Turn down PWM at high speed
       tone_temp -= 4;
       PWM_STP->setPWM(2, PA9, tone_temp, 50);
       Serial.print("-= ");
       Serial.println("4");
     }
-    if ((qwe) == (60000/speed_set)&& !run_in){     //при достижении скорости, запустить внутренний диск
+    if ((qwe) == (60000/speed_set)&& !run_in){     //When speed is reached, start the internal disk
       run_in = 1;
       analogWrite(PB7,speed_PWM);
       time_fan_in = millis() - 60000/speed_set;
@@ -199,20 +199,20 @@ void loop() {
   butt_ON.tick();
   enc1.tick();
 
-  if (enc1.isRight()) speed_temp --;     //Инкремент Энкодера на право
-  if (enc1.isLeft())  speed_temp ++;     //Инкремент Энкодера на лево
-  if (enc1.isFastR()) speed_temp -= 3;   //Инкремент ускорения Энкодера на право
-  if (enc1.isFastL()) speed_temp += 3;   //Инкремент ускорения Энкодера на лево
-  if (speed_temp > 200) speed_temp = 200;//Ограничение скорость в 200 об/мин
-  if (speed_temp < 0) speed_temp = 0;    //Ограничение скорость в 0 об/мин
+  if (enc1.isRight()) speed_temp --;     //Encoder increment to the right
+  if (enc1.isLeft())  speed_temp ++;     //Encoder increment to the left
+  if (enc1.isFastR()) speed_temp -= 3;   //Encoder acceleration increment to the right
+  if (enc1.isFastL()) speed_temp += 3;   //Encoder acceleration increment to the left
+  if (speed_temp > 200) speed_temp = 200;//Speed limit of 200 rpm
+  if (speed_temp < 0) speed_temp = 0;    //Speed limit of 0 rpm
 
-  if (enc1.isSingle()){                  //Разрешить или запретить изменение скорости, Кнопка у Энкодера
+  if (enc1.isSingle()){                  //Enable or disable speed change, Button at the Encoder
     if (enc_click){
       speed_set = speed_temp;
-      speed_PWM = map(speed_set, 0, 80, 500, 8191); //!!!поправил 200 на 80 (данный мотор на 12 вольт дает только 70 об\мин)
+      speed_PWM = map(speed_set, 0, 80, 500, 8191); //!!!corrected 200 to 80 (this 12 volt motor only gives 70 rpm).
       speed_tone = speed_set*96;
-      deb_time_in = 60000/speed_set - 60000/speed_set/10; //Конвертировать  время антидребезга внутреннего холла
-      deb_time_out= 60000/speed_set - 60000/speed_set/10; //Конвертировать  время антидребезга внешнего холла
+      deb_time_in = 60000/speed_set - 60000/speed_set/10; //Converting the internal hall sensor anti-bounce time
+      deb_time_out= 60000/speed_set - 60000/speed_set/10; //Converting the external hall sensor anti-bounce time
     }
     else
     {
@@ -222,22 +222,22 @@ void loop() {
   }
 
   if (butt_ON.isClick()){
-    run_rotation = !run_rotation; //Разрешить или запретить вращение
+    run_rotation = !run_rotation; //Enable or disable rotation
     if (run_rotation){
-      digitalWrite(PA15, LOW);    //Шаговый двигатель EN 0 — включен
+      digitalWrite(PA15, LOW);    //Stepper motor EN 0 - on
       time_fan_out= millis() - 60000/speed_set;
-      speed_PWM = map(speed_set, 0, 80, 500, 8191); //!!!поправил 200 на 80 (данный мотор на 12 вольт дает только 70 об\мин)
+      speed_PWM = map(speed_set, 0, 80, 500, 8191); //!!!corrected 200 to 80 (this 12 volt motor only gives 70 rpm).
       speed_tone = speed_set*96;
       tone_temp = 0;
-      deb_time_in = 60000/speed_set - 60000/speed_set/10; //Конвертировать  время антидребезга внутреннего холла
-      deb_time_out= 60000/speed_set - 60000/speed_set/10; //Конвертировать  время антидребезга внешнего холла
+      deb_time_in = 60000/speed_set - 60000/speed_set/10; //Converting the internal hall sensor anti-bounce time
+      deb_time_out= 60000/speed_set - 60000/speed_set/10; //Converting the external hall sensor anti-bounce time
     }
     else{
       run_in = 0;
     }
   }
   
-  if (enc_click){                 //отобразить дисплей выбора скорости
+  if (enc_click){                 //Rotation speed selection menu
     Disp_speed = speed_temp;
     ListDisp[3] = Disp_speed%10;
     Disp_speed = Disp_speed / 10;
@@ -249,7 +249,7 @@ void loop() {
     tm1637.display(ListDisp);
   }
   else{
-    if (!run_in){                 //отобразить дисплей реальной скорости
+    if (!run_in){                 //Rotation speed display
       Disp_speed = speed_out;
     }
     else{
